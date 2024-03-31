@@ -17,6 +17,11 @@ WORKING_DIR = os.getenv("TUNASYNC_WORKING_DIR")
 CONFIG = os.getenv("GITHUB_RELEASE_CONFIG", "github-release.json")
 REPOS = []
 
+#proxies = {
+#    'http': 'http://clash:5139916hao@172.16.110.80:6789',
+#    'https': 'https://clash:5139916hao@172.16.110.80:6789',
+#}
+
 # connect and read timeout value
 TIMEOUT_OPTION = (7, 10)
 total_size = 0
@@ -35,8 +40,8 @@ def github_get(*args, **kwargs):
         headers['Authorization'] = 'token {}'.format(
             os.environ['GITHUB_TOKEN'])
     kwargs['headers'] = headers
+    #kwargs['proxies'] = proxies
     return requests.get(*args, **kwargs)
-
 
 def do_download(remote_url: str, dst_file: Path, remote_ts: float, remote_size: int):
     # NOTE the stream=True parameter below
