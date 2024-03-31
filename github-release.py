@@ -1,50 +1,51 @@
 #!/usr/bin/env python3
+import json
 import os
-import sys
+import queue
+import tempfile
 import threading
 import traceback
-import queue
-from pathlib import Path
 from datetime import datetime
-import tempfile
-import json
+from pathlib import Path
 
 import requests
 
-
 BASE_URL = os.getenv("TUNASYNC_UPSTREAM_URL", "https://api.github.com/repos/")
-WORKING_DIR = os.getenv("TUNASYNC_WORKING_DIR")
+WORKING_DIR = os.getenv("TUNASYNC_WORKING_DIR", "./")
 CONFIG = os.getenv("GITHUB_RELEASE_CONFIG", "github-release.json")
 REPOS = []
-
-#proxies = {
-#    'http': 'http://clash:5139916hao@172.16.110.80:6789',
-#    'https': 'https://clash:5139916hao@172.16.110.80:6789',
-#}
+PROXY = os.getenv("PROXY", "")
 
 # connect and read timeout value
 TIMEOUT_OPTION = (7, 10)
 total_size = 0
 
 def sizeof_fmt(num, suffix='iB'):
-    for unit in ['','K','M','G','T','P','E','Z']:
+    for unit in ['', 'K', 'M', 'G', 'T', 'P', 'E', 'Z']:
         if abs(num) < 1024.0:
             return "%3.2f%s%s" % (num, unit, suffix)
         num /= 1024.0
     return "%.2f%s%s" % (num, 'Y', suffix)
 
+def get_request_session():
+    session = requests.Session()
+    if PROXY:
+        session.proxies = {
+            "http": PROXY,
+            "https": PROXY
+        }
+    return session
+
 # wrap around requests.get to use token if available
 def github_get(*args, **kwargs):
-    headers = kwargs['headers'] if 'headers' in kwargs else {}
+    session = get_request_session()
+    headers = kwargs.get('headers', {})
     if 'GITHUB_TOKEN' in os.environ:
-        headers['Authorization'] = 'token {}'.format(
-            os.environ['GITHUB_TOKEN'])
+        headers['Authorization'] = 'token {}'.format(os.environ['GITHUB_TOKEN'])
     kwargs['headers'] = headers
-    #kwargs['proxies'] = proxies
-    return requests.get(*args, **kwargs)
+    return session.get(*args, **kwargs)
 
 def do_download(remote_url: str, dst_file: Path, remote_ts: float, remote_size: int):
-    # NOTE the stream=True parameter below
     with github_get(remote_url, stream=True) as r:
         r.raise_for_status()
         tmp_dst_file = None
@@ -52,10 +53,8 @@ def do_download(remote_url: str, dst_file: Path, remote_ts: float, remote_size: 
             with tempfile.NamedTemporaryFile(prefix="." + dst_file.name + ".", suffix=".tmp", dir=dst_file.parent, delete=False) as f:
                 tmp_dst_file = Path(f.name)
                 for chunk in r.iter_content(chunk_size=1024**2):
-                    if chunk:  # filter out keep-alive new chunks
+                    if chunk:
                         f.write(chunk)
-                        # f.flush()
-            # check for downloaded size
             downloaded_size = tmp_dst_file.stat().st_size
             if remote_size != -1 and downloaded_size != remote_size:
                 raise Exception(f'File {dst_file.as_posix()} size mismatch: downloaded {downloaded_size} bytes, expected {remote_size} bytes')
@@ -63,10 +62,8 @@ def do_download(remote_url: str, dst_file: Path, remote_ts: float, remote_size: 
             tmp_dst_file.chmod(0o644)
             tmp_dst_file.replace(dst_file)
         finally:
-            if not tmp_dst_file is None:
-                if tmp_dst_file.is_file():
-                    tmp_dst_file.unlink()
-
+            if tmp_dst_file is not None and tmp_dst_file.is_file():
+                tmp_dst_file.unlink()
 
 def downloading_worker(q):
     while True:
@@ -91,7 +88,7 @@ def downloading_worker(q):
 def create_workers(n):
     task_queue = queue.Queue()
     for i in range(n):
-        t = threading.Thread(target=downloading_worker, args=(task_queue, ))
+        t = threading.Thread(target=downloading_worker, args=(task_queue,))
         t.start()
     return task_queue
 
@@ -129,7 +126,7 @@ def main():
     with open(args.config, "r") as f:
         REPOS = json.load(f)
 
-    def download(release, release_dir, tarball = False):
+    def download(release, release_dir, tarball=False):
         global total_size
 
         if tarball:
@@ -167,7 +164,7 @@ def main():
                     # print(f"{local_filesize} vs {asset['size']}")
                     # print(f"{local_mtime} vs {updated}")
                     if local_mtime > updated or \
-                        remote_size == local_filesize and local_mtime == updated:
+                            remote_size == local_filesize and local_mtime == updated:
                         print("skipping", dst_file.relative_to(
                             working_dir), flush=True)
                         continue
@@ -187,10 +184,10 @@ def main():
             pass
 
     for cfg in REPOS:
-        flat = False # build a folder for each release
-        versions = 1 # keep only one release
-        tarball = False # do not download the tarball
-        prerelease = False # filter out pre-releases
+        flat = False  # build a folder for each release
+        versions = 1  # keep only one release
+        tarball = False  # do not download the tarball
+        prerelease = False  # filter out pre-releases
         if isinstance(cfg, str):
             repo = cfg
         else:
@@ -262,8 +259,8 @@ def main():
 
         print("Total size is", sizeof_fmt(total_size, suffix=""))
 
+
 if __name__ == "__main__":
     main()
-
 
 # vim: ts=4 sw=4 sts=4 expandtab
