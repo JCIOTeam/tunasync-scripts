@@ -44,10 +44,10 @@ def github_get(github_token, *args, **kwargs):
     if github_token:
         headers['Authorization'] = 'token {}'.format(github_token)
     kwargs['headers'] = headers
-    return session.get(github_token, *args, **kwargs)
+    return session.get(*args, **kwargs)
 
-def do_download(remote_url: str, dst_file: Path, remote_ts: float, remote_size: int):
-    with github_get(remote_url, stream=True) as r:
+def do_download(github_token, remote_url: str, dst_file: Path, remote_ts: float, remote_size: int):
+    with github_get(github_token, remote_url, stream=True) as r:
         r.raise_for_status()
         tmp_dst_file = None
         try:
@@ -66,7 +66,7 @@ def do_download(remote_url: str, dst_file: Path, remote_ts: float, remote_size: 
             if tmp_dst_file is not None and tmp_dst_file.is_file():
                 tmp_dst_file.unlink()
 
-def downloading_worker(q):
+def downloading_worker(q, github_token):
     while True:
         item = q.get()
         if item is None:
@@ -77,7 +77,7 @@ def downloading_worker(q):
         print("downloading", url, "to",
               dst_file.relative_to(working_dir), flush=True)
         try:
-            do_download(url, dst_file, updated, remote_size)
+            do_download(github_token, url, dst_file, updated, remote_size)
         except Exception:
             print("Failed to download", url, flush=True)
             if dst_file.is_file():
@@ -86,10 +86,10 @@ def downloading_worker(q):
         q.task_done()
 
 
-def create_workers(n):
+def create_workers(n, github_token):
     task_queue = queue.Queue()
     for i in range(n):
-        t = threading.Thread(target=downloading_worker, args=(task_queue,))
+        t = threading.Thread(target=downloading_worker, args=(task_queue, github_token))
         t.start()
     return task_queue
 
@@ -121,7 +121,6 @@ def main():
         raise Exception("Working Directory is None")
 
     working_dir = Path(args.working_dir)
-    task_queue = create_workers(args.workers)
     github_token = args.token
     remote_filelist = []
     cleaning = False
@@ -186,6 +185,8 @@ def main():
         except OSError:
             pass
 
+    task_queue = create_workers(args.workers, github_token)
+
     for cfg in REPOS:
         flat = False  # build a folder for each release
         versions = 1  # keep only one release
@@ -208,7 +209,7 @@ def main():
         print(f"syncing {repo} to {repo_dir}")
 
         try:
-            r = github_get(f"{args.base_url}{repo}/releases")
+            r = github_get(github_token, f"{args.base_url}{repo}/releases")
             r.raise_for_status()
             releases = r.json()
         except:
@@ -232,7 +233,7 @@ def main():
         if n_downloaded == 0:
             print(f"Error: No release version found for {repo}")
             continue
-        time.sleep(10)
+        #time.sleep(10)
     else:
         cleaning = True
 
@@ -266,5 +267,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-# vim: ts=4 sw=4 sts=4 expandtab
